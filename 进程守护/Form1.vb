@@ -44,7 +44,7 @@ Public Class Form1
         End
     End Sub
     Private Sub Form1_Load(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles MyBase.Load
-        Me.Text = "进程守护V1.6"
+        Me.Text = "进程守护V1.7"
         Me.MaximizeBox = False
         Control.CheckForIllegalCrossThreadCalls = False
         Me.FormBorderStyle = Windows.Forms.FormBorderStyle.FixedSingle
@@ -282,7 +282,7 @@ Public Class Form1
         Process.Start("shutdown.exe", "-r -t 0")
     End Sub
     Private Sub ShutDownWindows()
-        Process.Start("shutdown.exe", "-s -t 10000")
+        Process.Start("shutdown.exe", "-s -t 0")
     End Sub
     Private Sub ProgressDog()
         Dim waitCount As Integer = myConf.waitCount
