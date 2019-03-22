@@ -14,9 +14,11 @@ Public Class Form1
     Dim voltageHttp As String = "http://10.253.12.107:5001/api/values/GetGateWayStatusInfo"
     Dim xmlPath As String = "ProgressDogConfig.txt"
     Dim myConf As conf
+    Dim title As String = "进程守护V2.0"
     Dim dogOpen As Boolean = False
     Dim isVoltageUrlRight As Boolean = False
     Dim voltageUrl As String = ""
+    Dim myTekConfig As TekConfig
     Structure conf
         Dim appName As String
         Dim autoStart As Boolean
@@ -44,10 +46,12 @@ Public Class Form1
         End
     End Sub
     Private Sub Form1_Load(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles MyBase.Load
-        Me.Text = "进程守护V1.7"
+
+        Me.Text = title
         Me.MaximizeBox = False
         Control.CheckForIllegalCrossThreadCalls = False
         Me.FormBorderStyle = Windows.Forms.FormBorderStyle.FixedSingle
+        LogHelper.Log("==================进程守护启动,title='" & title & "'==================")
         ini()
         If myConf.autoStart Then
             StartDog()
@@ -57,6 +61,7 @@ Public Class Form1
     End Sub
     Private Sub ini()
         iniConfig()
+        iniTekConfig()
         If myConf.voltageShutDown Then
             Dim th As New Thread(AddressOf GetVoltageUrl)
             th.Start()
@@ -87,6 +92,16 @@ Public Class Form1
         lblStatus.Text = "没有运行"
         CBVoltage.Checked = myConf.voltageShutDown
 
+    End Sub
+    Private Sub iniTekConfig()
+        Dim path As String = "config.ini"
+        If File.Exists(path) = False Then Return
+        Dim txt As String = File.ReadAllText(path)
+        Try
+            myTekConfig = JsonConvert.DeserializeObject(Of TekConfig)(txt)
+        Catch ex As Exception
+
+        End Try
     End Sub
     Private Sub DefaultConfig()
         If File.Exists(xmlPath) Then File.Delete(xmlPath)
@@ -210,33 +225,77 @@ Public Class Form1
         If waitCount = 0 Then waitCount = 8
         Dim url As String = voltageUrl
         Dim minVoltage As Double = 10.5
+
         Dim th As New Thread(Sub()
+                                 Dim runTime As Integer = 0
                                  While True
                                      Try
+                                         runTime = runTime + 1
+                                         If runTime = 11 Then runTime = 0
                                          Dim str As String = "正在获取..."
                                          lblVoltageValue.Text = str
                                          Dim d As Double = GetVoltage(url)
                                          If d = 0 Then
                                              str = "0 V [接口度数问题]"
                                              lblVoltageValue.ForeColor = Color.Red
+                                         Else
+                                             If d > 0 And d <= minVoltage Then
+                                                 str = d & " V [电压过低！]"
+                                                 lblVoltageValue.ForeColor = Color.Red
+                                                 LogHelper.Log(str + "上传日志到服务器")
+                                                 UploadTekWindowsShutdownToServer(d)
+                                                 ShutDownWindows(str)
+                                             End If
+                                             If d > minVoltage Then
+                                                 str = d & " V [电压正常]"
+                                                 lblVoltageValue.ForeColor = Color.Blue
+                                             End If
                                          End If
-                                         If d > 0 And d <= minVoltage Then
-                                             str = d & " V [电压过低！]"
-                                             lblVoltageValue.ForeColor = Color.Red
-                                             ShutDownWindows()
+                                         If runTime = 10 Then
+                                             LogHelper.Log(str + " (常规记录电压值)")
                                          End If
-                                         If d > minVoltage Then
-                                             str = d & " V [电压正常]"
-                                             lblVoltageValue.ForeColor = Color.Blue
-                                         End If
+                                         UploadTekVoltageToServer(d)
                                          lblVoltageValue.Text = str & " " & Now.ToString("yyyy-MM-dd HH:mm:ss")
                                      Catch ex As Exception
-
+                                         LogHelper.Log("GetVoltageLoop-->" & ex.ToString, "error")
                                      End Try
                                      Sleep(waitCount * 1000)
                                  End While
                              End Sub)
         th.Start()
+    End Sub
+    Private Sub UploadTekVoltageToServer(voltage As Double)
+        Try
+            If IsNothing(myTekConfig) Then Return
+            Dim url As String = "http://" & myTekConfig.serverIP & ":8085/api/default/UploadTekVoltageToServer?deviceId=" & myTekConfig.deviceID & "&voltage=" & voltage
+            Dim result As String = GetH(url, "")
+            Dim np As NormalResponse = JsonConvert.DeserializeObject(Of NormalResponse)(result)
+            If np.result Then
+                If IsNothing(np.data) = False Then
+                    If np.data = "shutdown" Then
+                        LogHelper.Log("收到服务器电压关机命令！")
+                        Dim str As String = "电压为" & voltage & "，来自服务器的关机命令" & "(" & np.msg & ")"
+                        LogHelper.Log(str + "上传日志到服务器")
+                        UploadTekWindowsShutdownToServer(voltage, "(来自服务器的关机命令," & np.msg & ")")
+                        ShutDownWindows(str)
+                    End If
+                End If
+            End If
+        Catch ex As Exception
+            '  MsgBox(ex.ToString)
+        End Try
+    End Sub
+    Private Sub UploadTekWindowsShutdownToServer(voltage As Double, Optional msg As String = "")
+        Try
+            If IsNothing(myTekConfig) Then Return
+            Dim url As String = "http://" & myTekConfig.serverIP & ":8085/api/default/UploadTekWindowsShutdownToServer?deviceId=" & myTekConfig.deviceID & "&voltage=" & voltage
+            If msg <> "" Then
+                url = url & "&msg=" & msg
+            End If
+            Dim result As String = GetH(url, "")
+        Catch ex As Exception
+
+        End Try
     End Sub
     Private Function GetVoltage(url As String) As Double
         Try
@@ -279,10 +338,22 @@ Public Class Form1
         End Try
     End Function
     Private Sub ReStartWindows()
-        Process.Start("shutdown.exe", "-r -t 0")
+        Try
+            Process.Start("shutdown.exe", "-r -t 0")
+        Catch ex As Exception
+            LogHelper.Log("发起重启命令报错！" & ex.ToString, "error")
+        End Try
+
     End Sub
-    Private Sub ShutDownWindows()
-        Process.Start("shutdown.exe", "-s -t 0")
+    Private Sub ShutDownWindows(Optional str As String = "")
+        LogHelper.Log(str & "发起关机命令！")
+        Try
+            Process.Start("shutdown.exe", "-s -t 0")
+            LogHelper.Log(str & "发起关机命令成功！")
+        Catch ex As Exception
+            LogHelper.Log(str & "发起关机命令报错！" & ex.ToString, "error")
+        End Try
+
     End Sub
     Private Sub ProgressDog()
         Dim waitCount As Integer = myConf.waitCount
