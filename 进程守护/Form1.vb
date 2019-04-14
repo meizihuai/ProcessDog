@@ -14,7 +14,7 @@ Public Class Form1
     Dim voltageHttp As String = "http://10.253.12.107:5001/api/values/GetGateWayStatusInfo"
     Dim xmlPath As String = "ProgressDogConfig.txt"
     Dim myConf As conf
-    Dim title As String = "进程守护V2.0"
+    Dim title As String = "进程守护V2.0.2"
     Dim dogOpen As Boolean = False
     Dim isVoltageUrlRight As Boolean = False
     Dim voltageUrl As String = ""
@@ -129,8 +129,9 @@ Public Class Form1
             voltageHttpIp = ip
         End If
         If voltageHttpIp <> "" Then
+
             Dim url As String = "http://" & voltageHttpIp & ":5001/api/values/GetGateWayStatusInfo"
-            If TestVoltageUrl(url) Then
+            If TestVoltageUrl(url, 10000) Then
                 '找到电压接口了
                 Me.isVoltageUrlRight = True
                 Me.voltageUrl = url
@@ -161,34 +162,39 @@ Public Class Form1
                 End If
             Next
         End If
+
         Dim hostName As String = Dns.GetHostName
         Dim ips As IPHostEntry = Dns.GetHostByName(hostName)
-        For Each itm In ips.AddressList
-            Dim ip As String = itm.ToString
-            If ip <> "127.0.0.1" And ip <> "localhost" Then
-                Dim st() As String = ip.Split(".")
-                Dim leftString = st(0) & "." & st(1) & "." & st(2) & "."
-                Dim lastint As Integer = Val(st(3))
-                For i = 1 To 255
-                    Dim newIp As String = leftString & i
-                    Dim url As String = "http://" & newIp & ":5001/api/values/GetGateWayStatusInfo"
-                    lblVoltagIP.Text = "正在测试 " & newIp
-                    lblVoltagIP.ForeColor = Color.Red
-                    If TestVoltageUrl(url) Then
-                        voltageHttpIp = newIp
-                        '找到电压接口了
-                        myConf.voltageHttpIp = voltageHttpIp
-                        SaveMyConfig()
-                        Me.isVoltageUrlRight = True
-                        Me.voltageUrl = url
-                        lblVoltagIP.Text = voltageHttpIp
-                        lblVoltagIP.ForeColor = Color.Blue
-                        GetVoltageLoop()
-                        Return
-                    End If
-                Next
-            End If
-        Next
+        While True
+            For Each itm In ips.AddressList
+                Dim ip As String = itm.ToString
+
+                If ip <> "127.0.0.1" And ip <> "localhost" Then
+                    Dim st() As String = ip.Split(".")
+                    Dim leftString = st(0) & "." & st(1) & "." & st(2) & "."
+                    Dim lastint As Integer = Val(st(3))
+                    For i = 1 To 255
+                        Dim newIp As String = leftString & i
+                        Dim url As String = "http://" & newIp & ":5001/api/values/GetGateWayStatusInfo"
+                        lblVoltagIP.Text = "正在测试 " & newIp
+                        lblVoltagIP.ForeColor = Color.Red
+                        If TestVoltageUrl(url) Then
+                            voltageHttpIp = newIp
+                            '找到电压接口了
+                            myConf.voltageHttpIp = voltageHttpIp
+                            SaveMyConfig()
+                            Me.isVoltageUrlRight = True
+                            Me.voltageUrl = url
+                            lblVoltagIP.Text = voltageHttpIp
+                            lblVoltagIP.ForeColor = Color.Blue
+                            GetVoltageLoop()
+                            Return
+                        End If
+                    Next
+                End If
+            Next
+        End While
+
 
         If Me.isVoltageUrlRight = False Then
             Me.isVoltageUrlRight = False
@@ -197,7 +203,7 @@ Public Class Form1
             lblVoltagIP.ForeColor = Color.Red
         End If
     End Sub
-    Private Function TestVoltageUrl(url As String) As Boolean
+    Private Function TestVoltageUrl(url As String, Optional timeout As Integer = 500) As Boolean
         Try
             Dim req As HttpWebRequest = WebRequest.Create(url)
             req.Accept = "*/*"
@@ -206,8 +212,8 @@ Public Class Form1
             req.KeepAlive = True
             req.ContentType = "application/x-www-form-urlencoded"
             req.Method = "GET"
-            req.Timeout = 100
-            req.ReadWriteTimeout = 100
+            req.Timeout = timeout
+            req.ReadWriteTimeout = timeout
             Dim rp As HttpWebResponse = req.GetResponse
             Dim str As String = New StreamReader(rp.GetResponseStream(), Encoding.UTF8).ReadToEnd
             Dim np As NormalResponse = JsonConvert.DeserializeObject(Of NormalResponse)(str)
